@@ -11,9 +11,6 @@ var errInsufficientLength = errors.New("insufficient length")
 
 // pipeStruct без какого-либо декорирования и всяких отдельных ридеров, врайтеров, ибо самописное (да, мне лень)
 type pipeStruct struct {
-	// writeMutex нужен на случай, если метод Write будут вызывать одновременно сразу несколько горутин.
-	// Следовательно, надо будет обкладывать запись, ибо это будет место для потенциального Data Race
-	writeMutex sync.Mutex
 	// Нужен для того, чтобы удостовериться, что мы закрыли канал единожды.
 	// Примечание: закрытие закрытого канала вызовет панику.
 	doneOnce sync.Once
@@ -28,13 +25,7 @@ type pipeStruct struct {
 func (p *pipeStruct) Read(dst []byte) (n int, err error) {
 	select {
 	case <-p.doneCh:
-		return 0, errClosed
-	default:
-	}
-
-	select {
-	case <-p.doneCh:
-		return 0, errClosed
+		return 0, io.EOF
 	case bw := <-p.writeCh:
 		nr := copy(dst, bw)
 		p.readCh <- nr
@@ -47,15 +38,11 @@ func (p *pipeStruct) Write(dst []byte) (n int, err error) {
 	case <-p.doneCh:
 		return 0, errClosed
 	default:
-		p.writeMutex.Lock()
-		defer p.writeMutex.Unlock()
 	}
-
 	if len(dst) <= 0 {
 		return 0, errInsufficientLength
 	}
-
-	bruh := func() (int, error) {
+	for len(dst) > 0 {
 		select {
 		case <-p.doneCh:
 			return 0, errClosed
@@ -66,16 +53,6 @@ func (p *pipeStruct) Write(dst []byte) (n int, err error) {
 			n += lastReadBytes
 		}
 		return n, nil
-	}
-	n, err = bruh()
-	if err != nil {
-		return n, err
-	}
-	for len(dst) > 0 {
-		n, err = bruh()
-		if err != nil {
-			return n, err
-		}
 	}
 
 	return n, nil
@@ -91,11 +68,10 @@ func (p *pipeStruct) Close() error {
 
 func MyPipe() (io.Reader, io.WriteCloser) {
 	p := pipeStruct{
-		writeMutex: sync.Mutex{},
-		doneOnce:   sync.Once{},
-		doneCh:     make(chan struct{}),
-		readCh:     make(chan int),
-		writeCh:    make(chan []byte),
+		doneOnce: sync.Once{},
+		doneCh:   make(chan struct{}),
+		readCh:   make(chan int),
+		writeCh:  make(chan []byte),
 	}
 	return &p, &p
 }

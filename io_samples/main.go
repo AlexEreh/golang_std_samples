@@ -3,7 +3,6 @@ package main
 import (
 	"fmt"
 	"io"
-	"time"
 )
 
 func main() {
@@ -15,7 +14,6 @@ func defaultPipeUsage() {
 	go func() {
 		for i := 0; i < 5; i++ {
 			_, _ = writer.Write([]byte("abc"))
-			time.Sleep(1 * time.Second)
 		}
 		_ = writer.Close()
 	}()
